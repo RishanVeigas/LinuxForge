@@ -1,0 +1,714 @@
+import { useState, useRef, useEffect, useCallback } from "react";
+
+// ── Virtual Filesystem ──────────────────────────────────────────────────────
+const FS_INITIAL = () => ({
+  home: {
+    user: {
+      documents: {
+        "report.txt":
+          "Q3 Financial Report\nRevenue: $1.2M\nExpenses: $800K\nProfit: $400K\nDepartment: Finance\nDepartment: Engineering\nDepartment: Finance\nDepartment: HR",
+        "notes.md":
+          "# Meeting Notes\n- Follow up with team\n- Review budget\n- Deploy new features\n- Follow up with client\n- Deploy hotfix",
+        "employees.txt":
+          "Alice\nBob\nCarol\nAlice\nDave\nBob\nEve\nCarol\nAlice",
+        "servers.txt":
+          "web-01 online\ndb-01 offline\nweb-02 online\ncache-01 online\ndb-02 offline\nweb-03 online",
+      },
+      downloads: {
+        "archive.tar.gz": "[binary data]",
+        "setup.sh": "#!/bin/bash\necho installing...",
+        "log.txt":
+          "ERROR: disk full\nINFO: service started\nERROR: connection timeout\nWARN: high memory\nERROR: null pointer\nINFO: backup complete",
+      },
+      ".bashrc": "# bash configuration\nexport PATH=$PATH:/usr/local/bin",
+      ".profile": "# profile loaded on login",
+    },
+  },
+  etc: {
+    hosts: "127.0.0.1 localhost\n::1 localhost",
+    passwd:
+      "root:x:0:0:root:/root:/bin/bash\nuser:x:1000:1000::/home/user:/bin/bash",
+  },
+  var: { log: { syslog: "[system log entries...]" } },
+  tmp: {},
+});
+
+const SYSTEM_INFO = {
+  user: "user",
+  hostname: "linux",
+  kernel: "Linux",
+  version: "6.5.0-1025-generic",
+  machine: "x86_64",
+  os: "GNU/Linux",
+  release: "#25~22.04.1-Ubuntu SMP",
+  nodename: "linux",
+};
+
+function normalizePath(p) {
+  const parts = p.split("/").filter(Boolean);
+  const out = [];
+  for (const part of parts) {
+    if (part === "..") out.pop();
+    else if (part !== ".") out.push(part);
+  }
+  return "/" + out.join("/");
+}
+
+function getNode(fs, path) {
+  if (path === "/") return fs;
+  const parts = path.split("/").filter(Boolean);
+  let node = fs;
+  for (const p of parts) {
+    if (node && typeof node === "object" && p in node) node = node[p];
+    else return null;
+  }
+  return node;
+}
+
+function cwdDisplay(cwd) {
+  if (cwd === "/home/user") return "~";
+  if (cwd.startsWith("/home/user/"))
+    return "~/" + cwd.slice("/home/user/".length);
+  return cwd;
+}
+
+function resolvePath(cwd, input) {
+  if (!input || input === "~") return "/home/user";
+  if (input.startsWith("/")) return normalizePath(input);
+  if (input === "..") return normalizePath(cwd + "/..");
+  if (input === ".") return cwd;
+  return normalizePath(cwd + "/" + input);
+}
+
+const LEVELS = [
+  { label: "Where Am I?", done: true },
+  { label: "Moving Around", done: true },
+  { label: "Text & Search", done: false, active: true },
+  { label: "Permissions", done: false },
+];
+
+const OBJECTIVES = [
+  {
+    id: "whoami",
+    text: "Run <code>whoami</code> to identify the current user",
+    done: false,
+  },
+  {
+    id: "uname",
+    text: "Run <code>uname -a</code> to inspect system info",
+    done: false,
+  },
+  {
+    id: "grep",
+    text: "Use <code>grep ERROR downloads/log.txt</code> to find errors",
+    done: false,
+  },
+  {
+    id: "sort",
+    text: "Use <code>sort documents/employees.txt</code> to sort names",
+    done: false,
+  },
+  {
+    id: "uniq",
+    text: "Use <code>uniq documents/employees.txt</code> or <code>sort | uniq</code>",
+    done: false,
+  },
+  {
+    id: "history",
+    text: "Run <code>history</code> to see command history",
+    done: false,
+  },
+];
+
+const CMD_REF = [
+  ["pwd", "print working directory"],
+  ["ls", "list directory contents"],
+  ["cd", "change directory"],
+  ["mkdir", "create directory"],
+  ["rmdir", "remove empty directory"],
+  ["rm", "remove file or directory"],
+  ["cp", "copy files"],
+  ["mv", "move/rename files"],
+  ["touch", "create empty file"],
+  ["cat", "display file contents"],
+  ["head", "first lines of file"],
+  ["tail", "last lines of file"],
+  ["echo", "print/write text"],
+  ["clear", "clear screen"],
+  ["whoami", "current user"],
+  ["id", "user identity info"],
+  ["uname", "system info"],
+  ["history", "command history"],
+  ["man", "manual pages"],
+  ["grep", "search text patterns in files"],
+  ["sort", "sort lines alphabetically or numerically"],
+  ["uniq", "remove or report duplicate lines"],
+  ["chmod", "change permissions"],
+  ["chown", "change ownership"],
+  ["df", "disk space"],
+  ["du", "directory usage"],
+  ["ps", "running processes"],
+  ["top", "live processes"],
+  ["kill", "terminate process"],
+  ["ping", "network test"],
+  ["help", "list all commands"],
+];
+
+export default function LinuxLearn() {
+  const [fs, setFs] = useState(FS_INITIAL);
+  const [cwd, setCwd] = useState("/home/user");
+  const [lines, setLines] = useState([
+    { text: "Linux Learning Platform  —  bash 5.2.21", cls: "dim" },
+    { text: "Type 'help' to see available commands.", cls: "dim" },
+    { text: "", cls: "" },
+    { text: "Welcome to Level 03 — Text & Search", cls: "green" },
+    { text: "Complete all 6 objectives in the panel →", cls: "yellow" },
+    { text: "", cls: "" },
+  ]);
+  const [inputVal, setInputVal] = useState("");
+  const [cmdHistory, setCmdHistory] = useState([]);
+  const [histIdx, setHistIdx] = useState(-1);
+  const [hintVisible, setHintVisible] = useState(false);
+  const [objectives, setObjectives] = useState(OBJECTIVES);
+  const [levelDone, setLevelDone] = useState(false);
+  const [toastVisible, setToastVisible] = useState(false);
+  const [pipelineAnim, setPipelineAnim] = useState(false);
+
+  const outputRef = useRef(null);
+  const inputRef = useRef(null);
+
+  const completedCount = objectives.filter((o) => o.done).length;
+  const progress = levelDone
+    ? 100
+    : Math.round((completedCount / objectives.length) * 90);
+
+  useEffect(() => {
+    if (outputRef.current)
+      outputRef.current.scrollTop = outputRef.current.scrollHeight;
+  }, [lines]);
+
+  const addLine = useCallback((text, cls = "") => {
+    setLines((prev) => [...prev, { text, cls }]);
+  }, []);
+
+  const addLines = useCallback((arr) => {
+    setLines((prev) => [...prev, ...arr]);
+  }, []);
+
+  const markObjective = useCallback((id) => {
+    setObjectives((prev) => {
+      const updated = prev.map((o) => (o.id === id ? { ...o, done: true } : o));
+      const allDone = updated.every((o) => o.done);
+      if (allDone) {
+        setTimeout(() => {
+          setLevelDone(true);
+          setToastVisible(true);
+          setLines((l) => [
+            ...l,
+            { text: "", cls: "" },
+            { text: "🎉 All objectives complete! Level 03 cleared.", cls: "green" },
+          ]);
+        }, 400);
+      }
+      return updated;
+    });
+  }, []);
+
+  const COMMANDS = useCallback(
+    (fsSnap) => ({
+      whoami() {
+        addLine(SYSTEM_INFO.user, "cyan");
+        markObjective("whoami");
+      },
+      uname(args) {
+        if (args.includes("-a")) {
+          addLine(`${SYSTEM_INFO.kernel} ${SYSTEM_INFO.nodename} ${SYSTEM_INFO.version} ${SYSTEM_INFO.release} ${SYSTEM_INFO.machine} ${SYSTEM_INFO.os}`, "cyan");
+          markObjective("uname");
+        } else if (args.includes("-r")) {
+          addLine(SYSTEM_INFO.version, "cyan");
+        } else if (args.includes("-m")) {
+          addLine(SYSTEM_INFO.machine, "cyan");
+        } else {
+          addLine(SYSTEM_INFO.kernel, "cyan");
+        }
+      },
+      grep(args) {
+        const iFlag = args.some((a) => a === "-i");
+        const cFlag = args.some((a) => a === "-c");
+        const nFlag = args.some((a) => a === "-n");
+        const vFlag = args.some((a) => a === "-v");
+        const cleaned = args.filter((a) => !a.startsWith("-"));
+        if (cleaned.length < 2) { addLine("grep: usage: grep [options] PATTERN FILE", "red"); return; }
+        const [pattern, filePath] = cleaned;
+        const resolved = resolvePath(cwd, filePath);
+        const node = getNode(fsSnap, resolved);
+        if (node === null || typeof node === "object") { addLine(`grep: ${filePath}: No such file or directory`, "red"); return; }
+        const regex = new RegExp(pattern, iFlag ? "i" : "");
+        const fileLines = node.split("\n");
+        let matches = fileLines.map((l, i) => ({ line: l, idx: i + 1 })).filter(({ line }) => (vFlag ? !regex.test(line) : regex.test(line)));
+        if (cFlag) addLine(String(matches.length), "cyan");
+        else if (matches.length === 0) addLine("(no matches)", "dim");
+        else matches.forEach(({ line, idx }) => addLine(nFlag ? `${idx}:${line}` : line, "green"));
+        markObjective("grep");
+      },
+      sort(args) {
+        const rFlag = args.some((a) => a === "-r");
+        const nFlag = args.some((a) => a === "-n");
+        const uFlag = args.some((a) => a === "-u");
+        const filePath = args.find((a) => !a.startsWith("-"));
+        if (!filePath) { addLine("sort: missing operand", "red"); return; }
+        const resolved = resolvePath(cwd, filePath);
+        const node = getNode(fsSnap, resolved);
+        if (node === null || typeof node === "object") { addLine(`sort: ${filePath}: No such file or directory`, "red"); return; }
+        let arr = node.split("\n").filter(Boolean);
+        arr = nFlag ? arr.sort((a, b) => parseFloat(a) - parseFloat(b)) : arr.sort();
+        if (rFlag) arr.reverse();
+        if (uFlag) arr = [...new Set(arr)];
+        arr.forEach((l) => addLine(l, "cyan"));
+        markObjective("sort");
+      },
+      uniq(args) {
+        const cFlag = args.some((a) => a === "-c");
+        const dFlag = args.some((a) => a === "-d");
+        const iFlag = args.some((a) => a === "-i");
+        const filePath = args.find((a) => !a.startsWith("-"));
+        if (!filePath) { addLine("uniq: missing operand", "red"); return; }
+        const resolved = resolvePath(cwd, filePath);
+        const node = getNode(fsSnap, resolved);
+        if (node === null || typeof node === "object") { addLine(`uniq: ${filePath}: No such file or directory`, "red"); return; }
+        const arr = node.split("\n").filter(Boolean);
+        const groups = [];
+        for (const line of arr) {
+          const key = iFlag ? line.toLowerCase() : line;
+          if (!groups.length || (iFlag ? groups[groups.length - 1].key.toLowerCase() : groups[groups.length - 1].key) !== key) groups.push({ key: line, count: 1 });
+          else groups[groups.length - 1].count++;
+        }
+        const result = dFlag ? groups.filter((g) => g.count > 1) : groups;
+        result.forEach(({ key, count }) => addLine(cFlag ? `      ${count} ${key}` : key, "cyan"));
+        markObjective("uniq");
+      },
+      history(_args, _raw, hist) {
+        if (!hist.length) { addLine("(no history)", "dim"); return; }
+        hist.forEach((cmd, i) => addLine(`  ${String(hist.length - i).padStart(3)}  ${cmd}`, "dim"));
+        markObjective("history");
+      },
+      pwd() { addLine(cwd, "cyan"); },
+      ls(args) {
+        const showHidden = args.some((a) => a.includes("a"));
+        const longFmt = args.some((a) => a.includes("l"));
+        const node = getNode(fsSnap, cwd);
+        if (!node || typeof node === "string") { addLine("ls: cannot access directory", "red"); return; }
+        const entries = Object.keys(node).filter((k) => showHidden || !k.startsWith("."));
+        if (!entries.length) { addLine("(empty)", "dim"); return; }
+        if (longFmt) {
+          addLine("total " + entries.length * 4, "dim");
+          entries.forEach((e) => {
+            const isDir = typeof node[e] === "object";
+            const perm = isDir ? "drwxr-xr-x" : "-rw-r--r--";
+            const size = isDir ? " 4096" : String((node[e] || "").length).padStart(5);
+            addLine(`${perm}  1 user user ${size} Apr 28 10:00 ${e}${isDir ? "/" : ""}`, isDir ? "blue" : "");
+          });
+        } else {
+          const parts = entries.map((e) => { const isDir = typeof node[e] === "object"; return { text: e + (isDir ? "/" : ""), isDir }; });
+          setLines((prev) => [...prev, { text: "", cls: "", lsRow: parts }]);
+        }
+      },
+      cd(args) {
+        const target = args[0] || "~";
+        const resolved = resolvePath(cwd, target);
+        const node = getNode(fsSnap, resolved);
+        if (node === null) { addLine(`bash: cd: ${target}: No such file or directory`, "red"); return; }
+        if (typeof node === "string") { addLine(`bash: cd: ${target}: Not a directory`, "red"); return; }
+        setCwd(resolved);
+      },
+      mkdir(args) {
+        if (!args[0]) { addLine("mkdir: missing operand", "red"); return; }
+        const node = getNode(fsSnap, cwd);
+        if (args[0] in node) { addLine(`mkdir: cannot create directory '${args[0]}': File exists`, "red"); return; }
+        setFs((prev) => { const copy = JSON.parse(JSON.stringify(prev)); getNode(copy, cwd)[args[0]] = {}; return copy; });
+      },
+      touch(args) {
+        if (!args[0]) { addLine("touch: missing file operand", "red"); return; }
+        setFs((prev) => { const copy = JSON.parse(JSON.stringify(prev)); const node = getNode(copy, cwd); if (!(args[0] in node)) node[args[0]] = ""; return copy; });
+      },
+      cat(args) {
+        if (!args[0]) { addLine("cat: missing operand", "red"); return; }
+        const node = getNode(fsSnap, cwd);
+        if (!(args[0] in node)) { addLine(`cat: ${args[0]}: No such file or directory`, "red"); return; }
+        if (typeof node[args[0]] === "object") { addLine(`cat: ${args[0]}: Is a directory`, "red"); return; }
+        (node[args[0]] || "(empty file)").split("\n").forEach((l) => addLine(l));
+      },
+      echo(args) {
+        const gtIdx = args.indexOf(">");
+        if (gtIdx !== -1) {
+          const text = args.slice(0, gtIdx).join(" ").replace(/^"|"$/g, "");
+          const filename = args[gtIdx + 1];
+          if (!filename) { addLine("bash: syntax error near '>'", "red"); return; }
+          setFs((prev) => { const copy = JSON.parse(JSON.stringify(prev)); getNode(copy, cwd)[filename] = text; return copy; });
+        } else {
+          addLine(args.join(" ").replace(/^"|"$/g, ""));
+        }
+      },
+      rm(args) {
+        const recursive = args.some((a) => a === "-r" || a === "-rf" || a === "-fr");
+        const target = args.find((a) => !a.startsWith("-"));
+        if (!target) { addLine("rm: missing operand", "red"); return; }
+        const node = getNode(fsSnap, cwd);
+        if (!(target in node)) { addLine(`rm: cannot remove '${target}': No such file or directory`, "red"); return; }
+        if (typeof node[target] === "object" && !recursive) { addLine(`rm: cannot remove '${target}': Is a directory`, "red"); return; }
+        setFs((prev) => { const copy = JSON.parse(JSON.stringify(prev)); delete getNode(copy, cwd)[target]; return copy; });
+      },
+      clear() { setLines([]); },
+      help() {
+        addLines([
+          { text: "Available commands:", cls: "green" },
+          { text: "", cls: "" },
+          ...CMD_REF.map(([name, desc]) => ({ text: `  ${name.padEnd(10)} — ${desc}`, cls: "dim", cmdRef: { name, desc } })),
+        ]);
+      },
+    }),
+    [cwd, addLine, addLines, markObjective],
+  );
+
+  function runPipeline(segments, fsSnap, hist) {
+    let buffer = [];
+    for (let i = 0; i < segments.length; i++) {
+      const parts = segments[i].trim().match(/(?:[^\s"]+|"[^"]*")+/g) || [];
+      const cmd = parts[0];
+      const args = parts.slice(1).map((a) => a.replace(/^"|"$/g, ""));
+      if (i === 0) {
+        if (cmd === "cat") {
+          if (!args[0]) { addLine("cat: missing operand", "red"); return; }
+          const resolved = resolvePath(cwd, args[0]);
+          const node = getNode(fsSnap, resolved);
+          if (!node || typeof node === "object") { addLine(`cat: ${args[0]}: No such file`, "red"); return; }
+          buffer = node.split("\n").filter(Boolean);
+        } else { addLine(`bash: pipe: '${cmd}' as pipe source not supported`, "red"); return; }
+      } else {
+        if (cmd === "grep") {
+          const iFlag = args.some((a) => a === "-i"); const vFlag = args.some((a) => a === "-v");
+          const pattern = args.find((a) => !a.startsWith("-"));
+          if (!pattern) { addLine("grep: missing pattern", "red"); return; }
+          const regex = new RegExp(pattern, iFlag ? "i" : "");
+          buffer = buffer.filter((l) => vFlag ? !regex.test(l) : regex.test(l));
+          markObjective("grep");
+        } else if (cmd === "sort") {
+          const rFlag = args.some((a) => a === "-r");
+          buffer = rFlag ? [...buffer].sort().reverse() : [...buffer].sort();
+          markObjective("sort");
+        } else if (cmd === "uniq") {
+          const cFlag = args.some((a) => a === "-c");
+          const groups = [];
+          for (const line of buffer) {
+            if (!groups.length || groups[groups.length - 1].key !== line) groups.push({ key: line, count: 1 });
+            else groups[groups.length - 1].count++;
+          }
+          buffer = groups.map(({ key, count }) => cFlag ? `      ${count} ${key}` : key);
+          markObjective("uniq");
+        } else { addLine(`bash: pipe: '${cmd}' as pipe stage not supported`, "red"); return; }
+      }
+    }
+    if (buffer.length === 0) addLine("(no output)", "dim");
+    else buffer.forEach((l) => addLine(l, "cyan"));
+    setPipelineAnim(true);
+    setTimeout(() => setPipelineAnim(false), 600);
+  }
+
+  function runCommand(raw) {
+    const trimmed = raw.trim();
+    if (!trimmed) return;
+    const newHist = [trimmed, ...cmdHistory];
+    setCmdHistory(newHist);
+    setHistIdx(-1);
+    setLines((prev) => [...prev, { text: "", cls: "", promptEcho: { path: cwdDisplay(cwd), cmd: trimmed } }]);
+    if (trimmed.includes("|")) { runPipeline(trimmed.split("|"), fs, newHist); return; }
+    const parts = trimmed.match(/(?:[^\s"]+|"[^"]*")+/g) || [];
+    const cmd = parts[0];
+    const args = parts.slice(1).map((a) => a.replace(/^"|"$/g, ""));
+    const cmds = COMMANDS(fs);
+    if (cmd in cmds) cmds[cmd](args, trimmed, newHist);
+    else addLine(`bash: ${cmd}: command not found`, "red");
+  }
+
+  function handleKeyDown(e) {
+    if (e.key === "Enter") { const val = inputVal; setInputVal(""); runCommand(val); }
+    else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHistIdx((i) => { const next = Math.min(i + 1, cmdHistory.length - 1); setInputVal(cmdHistory[next] || ""); return next; });
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHistIdx((i) => { const next = i - 1; if (next < 0) { setInputVal(""); return -1; } setInputVal(cmdHistory[next] || ""); return next; });
+    } else if (e.key === "Tab") {
+      e.preventDefault();
+      const node = getNode(fs, cwd);
+      if (!node || typeof node === "string") return;
+      const parts2 = inputVal.split(" ");
+      const last = parts2[parts2.length - 1];
+      const matches = Object.keys(node).filter((k) => k.startsWith(last));
+      if (matches.length === 1) { parts2[parts2.length - 1] = matches[0]; setInputVal(parts2.join(" ")); }
+    }
+  }
+
+  const clsMap = {
+    green: "text-green-400",
+    dim: "text-zinc-500",
+    yellow: "text-amber-400",
+    red: "text-red-400",
+    cyan: "text-cyan-300",
+    blue: "text-blue-300",
+    "": "text-zinc-300",
+  };
+
+  return (
+    <div
+      className="flex flex-col h-screen font-mono overflow-hidden"
+      style={{ background: "#0e0e0e", fontFamily: "'JetBrains Mono', monospace" }}
+      onClick={() => inputRef.current?.focus()}
+    >
+      {/* ── Topbar ── */}
+      <div className="flex items-center justify-between px-5 h-10 border-b flex-shrink-0" style={{ background: "#0e0e0e", borderColor: "#1a1a1a" }}>
+        <span style={{ color: "#4ade80", fontWeight: 700, letterSpacing: "0.08em", fontSize: 13 }}>linuxlearn</span>
+        <div className="flex gap-2 items-center">
+          {LEVELS.map((lv, i) => (
+            <div
+              key={i}
+              title={`Level ${i + 1}: ${lv.label}`}
+              style={{
+                width: 10, height: 10, borderRadius: "50%",
+                background: lv.active ? "#facc15" : lv.done ? "#4ade80" : "#2a2a2a",
+                border: `1px solid ${lv.active ? "#facc15" : lv.done ? "#4ade80" : "#3a3a3a"}`,
+              }}
+            />
+          ))}
+        </div>
+      </div>
+
+      <div className="flex flex-1 overflow-hidden">
+        {/* ── Lesson Panel ── */}
+        <div
+          className="flex-shrink-0 flex flex-col overflow-hidden"
+          style={{ width: "38%", background: "#111", borderRight: "1px solid #1e1e1e" }}
+        >
+          {/* Level Header */}
+          <div style={{ padding: "16px 20px 14px", borderBottom: "1px solid #1e1e1e" }}>
+            <div style={{ fontSize: 10, color: "#4ade80", letterSpacing: "0.14em", fontWeight: 700, textTransform: "uppercase", marginBottom: 4 }}>
+              LEVEL 03
+            </div>
+            <div style={{ fontSize: 15, color: "#e8e8e8", fontWeight: 600 }}>Text &amp; Search</div>
+          </div>
+
+          {/* Scrollable body */}
+          <div className="flex-1 overflow-y-auto" style={{ padding: "16px 20px" }}>
+            {/* Description */}
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 10, color: "#4ade80", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 700, marginBottom: 8 }}>Description</div>
+              <p style={{ fontSize: 12, color: "#9ca3af", lineHeight: 1.7, margin: 0 }}>
+                The filesystem is a tree of directories. Linux ships powerful text-processing tools.{" "}
+                <span style={{ color: "#4ade80" }}>grep</span> finds patterns,{" "}
+                <span style={{ color: "#4ade80" }}>sort</span> orders lines,{" "}
+                <span style={{ color: "#4ade80" }}>uniq</span> deduplicates. Chain them with{" "}
+                <span style={{ color: "#4ade80" }}>|</span> pipes for real power.
+              </p>
+            </div>
+
+            {/* Objective card — matches image: single green-bordered card style */}
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 10, color: "#4ade80", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 700, marginBottom: 8 }}>
+                Objectives — {completedCount}/{objectives.length}
+              </div>
+
+              {/* Progress bar */}
+              <div style={{ height: 2, background: "#1e1e1e", borderRadius: 2, marginBottom: 10 }}>
+                <div style={{ height: "100%", width: `${progress}%`, background: "#4ade80", borderRadius: 2, transition: "width 0.5s ease" }} />
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {objectives.map((obj) => (
+                  <div
+                    key={obj.id}
+                    style={{
+                      borderRadius: 4,
+                      padding: "8px 12px",
+                      fontSize: 11,
+                      lineHeight: 1.6,
+                      border: obj.done ? "1px solid #4ade80" : "1px solid #2a2a2a",
+                      background: obj.done ? "rgba(74,222,128,0.05)" : "#0d0d0d",
+                      color: obj.done ? "#4ade80" : "#9ca3af",
+                      transition: "all 0.3s ease",
+                    }}
+                  >
+                    <span style={{ marginRight: 8 }}>{obj.done ? "✓" : "○"}</span>
+                    <span
+                      dangerouslySetInnerHTML={{
+                        __html: obj.text
+                          .replace(/<code>/g, '<span style="color:#facc15">')
+                          .replace(/<\/code>/g, "</span>"),
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Hint */}
+            <div style={{ marginBottom: 20 }}>
+              <button
+                style={{
+                  width: "100%", textAlign: "left", fontSize: 11, fontFamily: "inherit",
+                  border: "1px solid #2a2a2a", color: hintVisible ? "#facc15" : "#555",
+                  padding: "7px 12px", borderRadius: 4, background: "transparent",
+                  cursor: "pointer", transition: "all 0.2s",
+                  borderColor: hintVisible ? "#facc15" : "#2a2a2a",
+                }}
+                onClick={(e) => { e.stopPropagation(); setHintVisible((v) => !v); }}
+              >
+                {hintVisible ? "[ hide hint ]" : "[ show hint ]"}
+              </button>
+              {hintVisible && (
+                <div style={{ marginTop: 8, background: "#130f00", border: "1px solid #3a2800", borderRadius: 4, padding: "10px 12px", fontSize: 11, color: "#facc15", lineHeight: 1.8 }}>
+                  Try: <span style={{ color: "#fde68a" }}>grep ERROR downloads/log.txt</span><br />
+                  Or pipe: <span style={{ color: "#fde68a" }}>cat documents/employees.txt | sort | uniq</span><br />
+                  System: <span style={{ color: "#fde68a" }}>whoami</span> and <span style={{ color: "#fde68a" }}>uname -a</span>
+                </div>
+              )}
+            </div>
+
+            {/* Pipe Concept */}
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 10, color: "#4ade80", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 700, marginBottom: 8 }}>Pipe Concept</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, opacity: pipelineAnim ? 1 : 0.5, transition: "opacity 0.3s" }}>
+                {["input", "|", "sort", "|", "uniq"].map((s, i) => (
+                  <span key={i} style={s === "|"
+                    ? { color: "#facc15", fontWeight: 700 }
+                    : { background: "#0a1a0a", border: "1px solid #1e3a1e", color: "#4ade80", padding: "3px 8px", borderRadius: 3 }
+                  }>{s}</span>
+                ))}
+              </div>
+            </div>
+
+            {/* Commands — full list matching image */}
+            <div>
+              <div style={{ fontSize: 10, color: "#4ade80", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 700, marginBottom: 8 }}>Commands</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                {CMD_REF.map(([name, desc]) => (
+                  <div key={name} style={{ display: "flex", gap: 8, fontSize: 11, alignItems: "baseline" }}>
+                    <span style={{ color: "#4ade80", fontWeight: 700, minWidth: 64 }}>{name}</span>
+                    <span style={{ color: "#4b5563" }}>{desc}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Terminal ── */}
+        <div className="flex-1 flex flex-col overflow-hidden relative" style={{ background: "#000" }}>
+          {/* Title bar */}
+          <div className="flex items-center justify-between flex-shrink-0" style={{ padding: "0 16px", height: 36, background: "#0d0d0d", borderBottom: "1px solid #1a1a1a" }}>
+            <div style={{ display: "flex", gap: 6 }}>
+              <div style={{ width: 12, height: 12, borderRadius: "50%", background: "#ff5f57" }} />
+              <div style={{ width: 12, height: 12, borderRadius: "50%", background: "#ffbd2e" }} />
+              <div style={{ width: 12, height: 12, borderRadius: "50%", background: "#28c840" }} />
+            </div>
+            <span style={{ fontSize: 11, color: "#3a3a3a", letterSpacing: "0.05em" }}>bash — user@linux</span>
+            <span />
+          </div>
+
+          {/* Output */}
+          <div
+            ref={outputRef}
+            className="flex-1 overflow-y-auto"
+            style={{ padding: "16px", paddingBottom: 8, display: "flex", flexDirection: "column", gap: 1, fontSize: 13, lineHeight: 1.6 }}
+          >
+            {lines.map((line, i) => {
+              if (line.promptEcho) {
+                return (
+                  <div key={i} style={{ fontSize: 13, lineHeight: 1.6 }}>
+                    <span style={{ color: "#4ade80", fontWeight: 700 }}>user@linux</span>
+                    <span style={{ color: "#444" }}>:</span>
+                    <span style={{ color: "#60a5fa" }}>{line.promptEcho.path}</span>
+                    <span style={{ color: "#444" }}>$</span>{" "}
+                    <span style={{ color: "#e4e4e7" }}>{line.promptEcho.cmd}</span>
+                  </div>
+                );
+              }
+              if (line.lsRow) {
+                return (
+                  <div key={i} style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
+                    {line.lsRow.map((entry, j) => (
+                      <span key={j} style={{ color: entry.isDir ? "#93c5fd" : "#e4e4e7", fontWeight: entry.isDir ? 700 : 400 }}>{entry.text}</span>
+                    ))}
+                  </div>
+                );
+              }
+              if (line.cmdRef) {
+                return (
+                  <div key={i} style={{ fontSize: 13 }}>
+                    <span style={{ color: "#4ade80", display: "inline-block", minWidth: 80 }}>{line.cmdRef.name}</span>
+                    <span style={{ color: "#333" }}> — </span>
+                    <span style={{ color: "#555" }}>{line.cmdRef.desc}</span>
+                  </div>
+                );
+              }
+              return (
+                <div key={i} className={clsMap[line.cls] || "text-zinc-300"} style={{ whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+                  {line.text || "\u00A0"}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Toast */}
+          {toastVisible && (
+            <div style={{
+              position: "absolute", bottom: 72, right: 16, width: 256,
+              background: "#0a1a0a", border: "1px solid #4ade80", borderRadius: 8,
+              padding: "16px", boxShadow: "0 0 24px rgba(74,222,128,0.1)", zIndex: 10,
+              animation: "fadeUp 0.3s ease",
+            }}>
+              <div style={{ color: "#4ade80", fontWeight: 700, fontSize: 13, marginBottom: 4 }}>✓ Level complete!</div>
+              <div style={{ color: "#6b7280", fontSize: 11, marginBottom: 12, lineHeight: 1.6 }}>You mastered text processing tools. Excellent work.</div>
+              <button
+                style={{ width: "100%", background: "#4ade80", color: "#000", fontWeight: 700, fontSize: 12, padding: "8px 0", borderRadius: 4, border: "none", cursor: "pointer", fontFamily: "inherit" }}
+                onClick={() => alert("Level 04: Permissions — coming soon!")}
+              >Next Level →</button>
+            </div>
+          )}
+
+          {/* Input row */}
+          <div className="flex items-center flex-shrink-0" style={{ padding: "8px 16px 16px", borderTop: "1px solid #111" }}>
+            <span style={{ fontSize: 13, whiteSpace: "nowrap", flexShrink: 0, userSelect: "none" }}>
+              <span style={{ color: "#4ade80", fontWeight: 700 }}>user@linux</span>
+              <span style={{ color: "#444" }}>:</span>
+              <span style={{ color: "#60a5fa" }}>{cwdDisplay(cwd)}</span>
+              <span style={{ color: "#444" }}>$</span>
+            </span>
+            <input
+              ref={inputRef}
+              style={{ background: "transparent", border: "none", outline: "none", fontFamily: "inherit", fontSize: 13, color: "#e4e4e7", flex: 1, caretColor: "#4ade80", marginLeft: 8 }}
+              value={inputVal}
+              onChange={(e) => setInputVal(e.target.value)}
+              onKeyDown={handleKeyDown}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              autoFocus
+            />
+          </div>
+        </div>
+      </div>
+
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap');
+        @keyframes fadeUp {
+          from { opacity: 0; transform: translateY(10px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #222; border-radius: 2px; }
+      `}</style>
+    </div>
+  );
+}
