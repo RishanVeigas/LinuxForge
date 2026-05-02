@@ -93,13 +93,13 @@ const LESSON = {
   ],
   validate: (cwd, history) => history.some(h => h.trim() === 'pwd'),
   successMsg: 'You ran pwd and found your location. That\'s the first skill every Linux user needs.',
-  nextLevel: '/learn/beginner/level-2',
+  nextLevel: '/beginner/level-2',
   xp: 50,
 };
 
 const LESSONS_NAV = [
-  { level: '01', title: 'Where Am I?',              status: 'active',  href: '/learn/beginner/level-1' },
-  { level: '02', title: 'Moving Around',            status: 'locked',  href: '/learn/beginner/level-2' },
+  { level: '01', title: 'Where Am I?',              status: 'active',  href: '/beginner/level-1' },
+  { level: '02', title: 'Moving Around',            status: 'locked',  href: '/beginner/level-2' },
   { level: '03', title: 'Creating Things',          status: 'locked',  href: '#' },
   { level: '04', title: 'Reading & Writing Files',  status: 'locked',  href: '#' },
   { level: '05', title: 'Permissions',              status: 'locked',  href: '#' },

@@ -178,7 +178,7 @@ export default function LandingPage() {
               topics={['Navigating the filesystem', 'Creating & reading files', 'Permissions & users', 'Pipes & redirections']}
               meta="10 lessons · 2 hrs"
               hoverClass="beginner-glow"
-              topLineClass="via-[#22d3ee]/40"
+              topLineClass="via-[#22d3ee]/40" 
                onClick = {()=>{
                   router.push('/beginner')
                 }}
