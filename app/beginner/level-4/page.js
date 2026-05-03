@@ -312,7 +312,7 @@ const LESSON = {
     { name: 'wc -l <file>',       desc: 'count lines only' },
   ],
   xp: 125,
-  nextLevel: '/beginner/level-5',
+  nextLevel: '/intermidiate/level-5',
 };
 
 /* ── Tree builder ── */
