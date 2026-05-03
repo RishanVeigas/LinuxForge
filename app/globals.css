@@ -1,26 +1,147 @@
+/* ── Google Fonts (must be first) ── */
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;600;700;800&display=swap');
+
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* ── Tailwind v4 theme tokens ── */
+@theme {
+  --font-display: 'Syne', sans-serif;
+  --font-mono:    'Space Mono', monospace;
+
+  --color-terminal-bg:         #080c08;
+  --color-terminal-panel:      #0d120d;
+  --color-terminal-border:     #1a2e1a;
+  --color-terminal-green:      #3ddc84;
+  --color-terminal-green-dim:  #1e4a2e;
+  --color-terminal-amber:      #f59e0b;
+  --color-terminal-cyan:       #22d3ee;
+  --color-terminal-muted:      #4a5568;
+
+  --animate-blink: blink 1s step-end infinite;
+  --animate-float: float 6s ease-in-out infinite;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
+/* ── Base ── */
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: #080c08;
+  font-family: 'Syne', sans-serif;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: #080c08; }
+::-webkit-scrollbar-thumb { background: #1a2e1a; border-radius: 2px; }
+
+/* ── Noise texture overlay ── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.4;
+}
+
+/* ── Grid background ── */
+.grid-bg {
+  background-image:
+    linear-gradient(rgba(61, 220, 132, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(61, 220, 132, 0.03) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+/* ── Glow utilities ── */
+.glow-green {
+  box-shadow: 0 0 60px rgba(61, 220, 132, 0.08), 0 0 120px rgba(61, 220, 132, 0.04);
+}
+
+.glow-text {
+  text-shadow: 0 0 40px rgba(61, 220, 132, 0.4);
+}
+
+/* ── Card hover glows ── */
+.beginner-glow:hover {
+  box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.4), 0 20px 60px rgba(34, 211, 238, 0.06);
+}
+.intermediate-glow:hover {
+  box-shadow: 0 0 0 1px rgba(61, 220, 132, 0.4), 0 20px 60px rgba(61, 220, 132, 0.08);
+}
+.expert-glow:hover {
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.4), 0 20px 60px rgba(245, 158, 11, 0.06);
+}
+
+/* ── Command/path badge ── */
+.path-badge {
+  background: linear-gradient(135deg, #0d1a0d 0%, #0f2010 100%);
+  border: 1px solid #1a3a1a;
+}
+
+/* ── Terminal line prompt prefix ── */
+.terminal-line::before {
+  content: '$ ';
+  color: #3ddc84;
+  font-family: 'Space Mono', monospace;
+}
+
+/* ── Scroll animation ── */
+.track-enter {
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.6s ease, transform 0.6s ease;
+}
+.track-enter.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ── Keyframes ── */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-8px); }
+}
+
+@keyframes typewriter {
+  from { width: 0; }
+  to   { width: 100%; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ── Animation classes ── */
+.animate-blink { animation: blink 1s step-end infinite; }
+.animate-float { animation: float 6s ease-in-out infinite; }
+
+/* ── Typewriter terminal lines ── */
+.typewriter {
+  overflow: hidden;
+  white-space: nowrap;
+  animation: typewriter 2s steps(30) 0.5s forwards;
+  width: 0;
+}
+.typewriter-2 {
+  overflow: hidden;
+  white-space: nowrap;
+  animation: typewriter 1.5s steps(22) 3s forwards;
+  width: 0;
+}
+.typewriter-3 {
+  overflow: hidden;
+  white-space: nowrap;
+  animation: typewriter 1.8s steps(25) 5s forwards;
+  width: 0;
+}
+.fade-in-delayed-1 {
+  animation: fadeIn 0.5s ease 2.5s forwards;
 }
