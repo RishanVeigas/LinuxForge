@@ -68,7 +68,12 @@ export default function LandingPage() {
           </div>
 
           <div className="flex items-center gap-3">
-            <button className="font-mono text-xs text-gray-500 hover:text-white transition-colors duration-200 hidden sm:block">
+            <button
+              className="font-mono text-xs text-gray-500 hover:text-white transition-colors duration-200 hidden sm:block"
+              onClick={(e) => {
+                router.push("/login");
+              }}
+            >
               sign in
             </button>
             <button className="font-mono text-xs bg-[#3ddc84] text-black px-4 py-2 rounded font-bold hover:bg-[#3ddc84]/90 transition-all duration-200 hover:scale-[1.02]">
