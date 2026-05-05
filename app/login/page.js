@@ -132,11 +132,126 @@ function Field({
   );
 }
 
+// ── Redirect / loading screen ─────────────────────────────────────────────────
+function RedirectScreen({ username, progress }) {
+  const steps = [
+    { label: "verifying credentials", done: progress >= 25 },
+    { label: "loading user profile", done: progress >= 55 },
+    { label: "initialising workspace", done: progress >= 80 },
+    { label: "redirecting...", done: progress >= 100 },
+  ];
+
+  return (
+    <div style={{ padding: "32px 24px" }}>
+      {/* Icon */}
+      <div
+        style={{
+          width: 44,
+          height: 44,
+          borderRadius: "50%",
+          background: "#3ddc8412",
+          border: "1px solid #3ddc8425",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          margin: "0 auto 18px",
+          color: "#3ddc84",
+          fontSize: 18,
+        }}
+      >
+        ✓
+      </div>
+
+      <div
+        style={{
+          fontFamily: "monospace",
+          fontSize: 13,
+          color: "#fff",
+          textAlign: "center",
+          marginBottom: 4,
+        }}
+      >
+        Welcome back, {username}
+      </div>
+      <div
+        style={{
+          fontFamily: "monospace",
+          fontSize: 10,
+          color: "#4b5563",
+          textAlign: "center",
+          marginBottom: 22,
+        }}
+      >
+        session established
+      </div>
+
+      {/* Progress bar */}
+      <div
+        style={{
+          height: 2,
+          background: "#1a2e1a",
+          borderRadius: 2,
+          marginBottom: 20,
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            height: "100%",
+            width: `${progress}%`,
+            background: "linear-gradient(90deg, #3ddc84, #22d3ee)",
+            borderRadius: 2,
+            transition: "width 0.4s ease",
+            boxShadow: "0 0 8px #3ddc8480",
+          }}
+        />
+      </div>
+
+      {/* Step list */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {steps.map(({ label, done }, i) => {
+          const active = !done && steps.slice(0, i).every((s) => s.done);
+          return (
+            <div
+              key={label}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                fontFamily: "monospace",
+                fontSize: 10,
+                color: done ? "#3ddc84" : active ? "#e5e7eb" : "#1f2937",
+                transition: "color 0.3s",
+              }}
+            >
+              <span style={{ width: 12, textAlign: "center" }}>
+                {done ? "✓" : active ? "›" : "·"}
+              </span>
+              {label}
+              {active && (
+                <span
+                  style={{
+                    display: "inline-block",
+                    animation: "blink 0.7s step-end infinite",
+                  }}
+                >
+                  ▊
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <style>{`@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }`}</style>
+    </div>
+  );
+}
+
 // ── Session success screen ────────────────────────────────────────────────────
 function SessionView({ username, email, onLogout }) {
   return (
     <div style={{ padding: "28px 24px", textAlign: "center" }}>
-      {/* Avatar */}
       <div
         style={{
           width: 44,
@@ -174,8 +289,6 @@ function SessionView({ username, email, onLogout }) {
       >
         {email}
       </div>
-
-      {/* Session info */}
       <div
         style={{
           border: "1px solid #1a2e1a",
@@ -217,7 +330,6 @@ function SessionView({ username, email, onLogout }) {
           </div>
         ))}
       </div>
-
       <button
         onClick={onLogout}
         style={{
@@ -249,13 +361,16 @@ function SessionView({ username, email, onLogout }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function LinuxForgeAuth() {
-  const [tab, setTab] = useState("login"); // "login" | "register"
+  const [tab, setTab] = useState("login");
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [user, setUser] = useState(null); // { username, email }
+  // "auth" | "redirecting" | "dashboard"
+  const [phase, setPhase] = useState("auth");
+  const [redirectProgress, setRedirectProgress] = useState(0);
+  const [user, setUser] = useState(null);
   const cursorRef = useRef(null);
 
   // Blinking cursor
@@ -268,7 +383,33 @@ export default function LinuxForgeAuth() {
     return () => clearInterval(id);
   }, []);
 
-  // Reset form on tab switch
+  // Redirect progress animation
+  useEffect(() => {
+    if (phase !== "redirecting") return;
+
+    setRedirectProgress(0);
+    const steps = [
+      { target: 30, delay: 200 },
+      { target: 60, delay: 700 },
+      { target: 85, delay: 1300 },
+      { target: 100, delay: 1900 },
+    ];
+
+    const timers = steps.map(({ target, delay }) =>
+      setTimeout(() => setRedirectProgress(target), delay),
+    );
+
+    // Redirect to main page after animation completes
+    const done = setTimeout(() => {
+      window.location.href = "/";
+    }, 2700);
+
+    return () => {
+      timers.forEach(clearTimeout);
+      clearTimeout(done);
+    };
+  }, [phase]);
+
   const switchTab = (t) => {
     setTab(t);
     setEmail("");
@@ -301,33 +442,37 @@ export default function LinuxForgeAuth() {
     setError("");
     setLoading(true);
 
-    // Simulate API call
     await new Promise((r) => setTimeout(r, 900));
 
-    // Demo: wrong password simulation for login
     if (tab === "login" && password.length < 8) {
       setError("Invalid email or password.");
       setLoading(false);
       return;
     }
 
-    setUser({
+    const loggedInUser = {
       username: tab === "register" ? username : email.split("@")[0],
       email,
-    });
+    };
+    setUser(loggedInUser);
     setLoading(false);
+
+    // Start redirect flow
+    setPhase("redirecting");
   };
 
   const handleLogout = () => {
     setUser(null);
+    setPhase("auth");
     setTab("login");
     setEmail("");
     setUsername("");
     setPassword("");
     setError("");
+    setRedirectProgress(0);
   };
 
-  // ── Styles ─────────────────────────────────────────────────────────────────
+  // ── Auth / redirect card ────────────────────────────────────────────────────
   const S = {
     page: {
       minHeight: "100vh",
@@ -403,52 +548,58 @@ export default function LinuxForgeAuth() {
         }}
       />
 
-      {/* Logo */}
-      <div
-        style={{ textAlign: "center", marginBottom: 28, position: "relative" }}
-      >
+      {/* Logo — hidden during redirect */}
+      {phase === "auth" && (
         <div
           style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 10,
-            marginBottom: 6,
+            textAlign: "center",
+            marginBottom: 28,
+            position: "relative",
           }}
         >
           <div
             style={{
-              width: 30,
-              height: 30,
-              border: "1px solid #3ddc8450",
-              borderRadius: 6,
-              display: "flex",
+              display: "inline-flex",
               alignItems: "center",
-              justifyContent: "center",
-              color: "#3ddc84",
-              fontSize: 11,
-              fontWeight: 700,
+              gap: 10,
+              marginBottom: 6,
             }}
           >
-            $_
+            <div
+              style={{
+                width: 30,
+                height: 30,
+                border: "1px solid #3ddc8450",
+                borderRadius: 6,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#3ddc84",
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              $_
+            </div>
+            <span
+              style={{
+                color: "#fff",
+                fontSize: 14,
+                fontWeight: 700,
+                letterSpacing: "-0.02em",
+              }}
+            >
+              LinuxForge
+            </span>
           </div>
-          <span
-            style={{
-              color: "#fff",
-              fontSize: 14,
-              fontWeight: 700,
-              letterSpacing: "-0.02em",
-            }}
-          >
-            LinuxForge
-          </span>
+          <div style={{ fontSize: 11, color: "#374151" }}>
+            authenticate to continue
+            <span ref={cursorRef} style={{ color: "#3ddc84", marginLeft: 2 }}>
+              ▊
+            </span>
+          </div>
         </div>
-        <div style={{ fontSize: 11, color: "#374151" }}>
-          authenticate to continue
-          <span ref={cursorRef} style={{ color: "#3ddc84", marginLeft: 2 }}>
-            ▊
-          </span>
-        </div>
-      </div>
+      )}
 
       {/* Card */}
       <div style={S.card}>
@@ -481,16 +632,16 @@ export default function LinuxForgeAuth() {
             ))}
           </div>
           <span style={{ fontSize: 10, color: "#374151" }}>
-            bash — {user ? user.username : "auth"}@linuxforge:~
+            bash — {phase === "redirecting" ? user?.username : "auth"}
+            @linuxforge:~
           </span>
           <span />
         </div>
 
-        {user ? (
-          <SessionView
-            username={user.username}
-            email={user.email}
-            onLogout={handleLogout}
+        {phase === "redirecting" ? (
+          <RedirectScreen
+            username={user?.username}
+            progress={redirectProgress}
           />
         ) : (
           <>
