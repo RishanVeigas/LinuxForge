@@ -2,19 +2,27 @@
   "name": "linux-mastery",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
-    "dev":   "next dev",
+    "dev": "next dev",
     "build": "next build",
-    "start": "next start",
-    "lint":  "next lint"
+    "start": "node app.js",
+    "lint": "next lint"
   },
   "dependencies": {
-    "next":      "latest",
-    "react":     "^19",
+    "bcrypt": "^5.1.1",
+    "connect-mongo": "^5.1.0",
+    "cors": "^2.8.6",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-session": "^1.18.0",
+    "mongoose": "^8.4.0",
+    "next": "latest",
+    "react": "^19",
     "react-dom": "^19"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "tailwindcss":          "^4"
+    "@tailwindcss/postcss": "^4.2.4",
+    "tailwindcss": "^4.2.4"
   }
 }

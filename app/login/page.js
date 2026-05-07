@@ -435,30 +435,75 @@ export default function LinuxForgeAuth() {
 
   const handleSubmit = async () => {
     const err = validate();
+
     if (err) {
       setError(err);
       return;
     }
+
     setError("");
     setLoading(true);
 
-    await new Promise((r) => setTimeout(r, 900));
+    try {
+      const endpoint =
+        tab === "login"
+          ? "http://localhost:5000/auth/login"
+          : "http://localhost:5000/auth/register";
 
-    if (tab === "login" && password.length < 8) {
-      setError("Invalid email or password.");
+      const body =
+        tab === "login"
+          ? {
+              email,
+              password,
+            }
+          : {
+              email,
+              password,
+              username,
+            };
+
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+
+        // IMPORTANT for sessions/cookies
+        credentials: "include",
+
+        body: JSON.stringify(body),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setError(data.message || "Authentication failed");
+        setLoading(false);
+        return;
+      }
+
+      const loggedInUser = {
+        username: tab === "register" ? username : data.email.split("@")[0],
+
+        email: data.email,
+      };
+
+      setUser(loggedInUser);
+
       setLoading(false);
-      return;
+
+      setPhase("redirecting");
+    } catch (err) {
+      console.error(err);
+
+      if (err.name === "TypeError") {
+        setError("Cannot connect to backend");
+      } else {
+        setError(err.message || "Server error");
+      }
+
+      setLoading(false);
     }
-
-    const loggedInUser = {
-      username: tab === "register" ? username : email.split("@")[0],
-      email,
-    };
-    setUser(loggedInUser);
-    setLoading(false);
-
-    // Start redirect flow
-    setPhase("redirecting");
   };
 
   const handleLogout = () => {
